@@ -51,7 +51,6 @@ class LayoutDetector:
                     index=i,
                     label=box.label,
                     type=BlockType.from_surya_label(box.label),
-                    original_type=box.label,
                     bbox=_bbox_xyxy(box),
                     reading_order=box.position,
                 )

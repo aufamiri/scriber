@@ -11,9 +11,7 @@ class LayoutBlock:
 
     ``bbox`` is pixel ``[x0, y0, x1, y1]`` in the rendered page image's
     coordinate space. ``type`` is the coarse category derived from
-    ``label`` (see ``BlockType.LABEL_TO_TYPE``) that the rest of the
-    pipeline gates on: OCR runs on Text and SectionHeader; block
-    processing handles only Text / SectionHeader / Picture.
+    ``label`` (see ``BlockType.LABEL_TO_TYPE``)
     """
 
     index: int
