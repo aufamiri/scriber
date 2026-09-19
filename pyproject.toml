@@ -10,6 +10,7 @@ requires-python = ">=3.11"
 dependencies = [
     "pymupdf ==1.28.2",
     "surya-ocr ==0.22.1",
+    "pillow >=10.4",
 ]
 
 [project.scripts]
@@ -19,7 +20,15 @@ scriber = "scriber:main"
 requires = ["uv_build>=0.12.5,<0.13.0"]
 build-backend = "uv_build"
 
+[tool.pyright]
+include = ["src"]
+extraPaths = ["src"]
+venvPath = "."
+venv = ".venv"
+pythonVersion = "3.11"
+
 [dependency-groups]
 dev = [
     "debugpy>=1.8.21",
+    "pytest>=8",
 ]

@@ -1,3 +1,3 @@
-from scriber import main
+from scriber.cli import main
 
 main()
