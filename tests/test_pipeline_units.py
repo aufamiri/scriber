@@ -2,7 +2,8 @@
 
 Tests the title promotion heuristic, the label→type mapping, the block
 processing rules, the HTML-to-text conversion, and the job-id
-memoization. No surya needed.
+memoization. No surya models are loaded (only surya's prompt/schema
+modules are imported).
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ from scriber.domain import LayoutBlock, OCRBlock, RenderedPage
 from scriber.enums import BlockType
 from scriber.helpers import HtmlExtractor
 from scriber.layout import _promote_titles
+from scriber.ocr import _force_ocr_language, block_prompt
 from scriber.processing import process_page
 from scriber.utils import JobIdUtil
 
@@ -267,6 +269,31 @@ def test_html_extractor_state_does_not_leak_between_calls():
         "HtmlExtractor accumulates state across calls — every block after "
         "the first would contain all previous blocks' text"
     )
+
+
+# ---- OCR language forcing ---------------------------------------------------
+
+
+def test_block_prompt_appends_language_hint():
+    prompt = block_prompt("Indonesian")
+    # Keeps surya's original instruction, appends the hint.
+    assert prompt.startswith("OCR this block image to HTML.")
+    assert "Indonesian" in prompt
+
+
+def test_force_ocr_language_overrides_block_prompt():
+    from surya.inference.prompts import PROMPT_MAPPING, PROMPT_TYPE_BLOCK
+
+    original = PROMPT_MAPPING[PROMPT_TYPE_BLOCK]
+    try:
+        _force_ocr_language("Indonesian")
+        assert PROMPT_MAPPING[PROMPT_TYPE_BLOCK] == block_prompt("Indonesian")
+
+        # None is a no-op — whatever is mapped stays mapped.
+        _force_ocr_language(None)
+        assert PROMPT_MAPPING[PROMPT_TYPE_BLOCK] == block_prompt("Indonesian")
+    finally:
+        PROMPT_MAPPING[PROMPT_TYPE_BLOCK] = original
 
 
 # ---- JobIdUtil: job id memoization ------------------------------------------

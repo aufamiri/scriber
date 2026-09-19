@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from PIL import Image
 from surya.inference import SuryaInferenceManager
+from surya.inference.prompts import BLOCK_PROMPT, PROMPT_MAPPING, PROMPT_TYPE_BLOCK
 from surya.layout.schema import LayoutBox, LayoutResult
 from surya.recognition import RecognitionPredictor
 
@@ -54,8 +55,34 @@ def _to_surya_layout_box(block: LayoutBlock) -> LayoutBox:
     )
 
 
+def block_prompt(language: str) -> str:
+    """surya's default OCR prompt, extended with a language hint so the
+    model reproduces the printed script instead of substituting another
+    (e.g. italic Indonesian text drifting to Cyrillic)."""
+    return f"{BLOCK_PROMPT} The text is written in {language} — reproduce it exactly as printed."
+
+
+def _force_ocr_language(language: str | None) -> None:
+    """Runtime-override surya's default block prompt when a language is set.
+
+    PROMPT_MAPPING is the dict the inference backend consults per request
+    (``item.prompt or PROMPT_MAPPING[item.prompt_type]``); mutating it in
+    place here propagates to every OCR call in this process. Nothing on
+    disk is touched — our own code reapplies this on every run, so a
+    surya reinstall can't lose it. ``language=None`` is a no-op (surya's
+    default prompt stays in effect).
+    """
+    if language is not None:
+        print(f"Hinting OCR to use {language} language.")
+
+        PROMPT_MAPPING[PROMPT_TYPE_BLOCK] = block_prompt(language)
+
+
 class OCREngine:
-    def __init__(self, manager: SuryaInferenceManager) -> None:
+    def __init__(
+            self, manager: SuryaInferenceManager, language: str | None = None
+    ) -> None:
+        _force_ocr_language(language)
         self._predictor = RecognitionPredictor(manager)
         self.html_extractor = HtmlExtractor()
 

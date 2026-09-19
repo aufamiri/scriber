@@ -45,6 +45,14 @@ def build_parser() -> argparse.ArgumentParser:
              "flagged for image embedding (default: 0.5)",
     )
     parser.add_argument(
+        "--language",
+        type=str,
+        default=None,
+        help="language hint for OCR, e.g. 'Indonesian' — keeps the model "
+             "reproducing the printed script instead of substituting "
+             "another (default: none)",
+    )
+    parser.add_argument(
         "--cache-dir",
         type=Path,
         default=None,
@@ -74,6 +82,8 @@ def main(argv: list[str] | None = None) -> None:
         config.dpi = args.dpi
     if args.title_confidence_threshold is not None:
         config.title_confidence_threshold = args.title_confidence_threshold
+    if args.language is not None:
+        config.language = args.language
     if args.cache_dir is not None:
         config.cache_dir = args.cache_dir
     if args.pages is not None:

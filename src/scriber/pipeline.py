@@ -27,7 +27,7 @@ class Pipeline:
         # and is shared by layout and OCR.
         surya_manager = SuryaInferenceManager()
         self._layout = LayoutDetector(surya_manager)
-        self._ocr = OCREngine(surya_manager)
+        self._ocr = OCREngine(surya_manager, language=self._config.language)
 
     @property
     def config(self) -> ScriberConfig:

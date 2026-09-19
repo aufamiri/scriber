@@ -41,6 +41,11 @@ def _env_path(name: str, default: Path) -> Path:
     return Path(raw).expanduser() if raw else default
 
 
+def _env_str(name: str, default: str | None) -> str | None:
+    raw = os.environ.get(f"{ENV_PREFIX}{name}")
+    return raw if raw else default
+
+
 @dataclass
 class ScriberConfig:
     dpi: int = 200
@@ -53,6 +58,11 @@ class ScriberConfig:
     # Optional hard cap on pages processed — handy for smoke-testing a
     # full novel PDF. None means all pages.
     max_pages: int | None = None
+    # Optional OCR language hint (e.g. "Indonesian") — appended to surya's
+    # OCR prompt so the model reproduces the printed script instead of
+    # substituting another (e.g. italic text drifting to Cyrillic). None
+    # means surya's default prompt, no language forcing.
+    language: str | None = None
 
     @classmethod
     def from_env(cls) -> ScriberConfig:
@@ -63,4 +73,5 @@ class ScriberConfig:
             ),
             cache_dir=_env_path("CACHE_DIR", Path.home() / ".cache" / "pdf-ocr"),
             page_batch_size=_env_int("PAGE_BATCH_SIZE", cls.page_batch_size),
+            language=_env_str("LANGUAGE", None),
         )
