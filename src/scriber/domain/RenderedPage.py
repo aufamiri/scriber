@@ -12,3 +12,5 @@ class RenderedPage:
     image_path: Path
     width: int
     height: int
+    # Deterministic uuid5 over job_id + page number (see utils.IdUtil).
+    id: str = ""

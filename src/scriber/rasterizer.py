@@ -11,7 +11,7 @@ import pymupdf
 
 from scriber.config import ScriberConfig
 from scriber.domain import RenderedPage
-from scriber.utils import JobIdUtil
+from scriber.utils import JobIdUtil, stable_id
 
 MAX_DPI = 300
 
@@ -31,7 +31,8 @@ class Rasterizer:
         if not pdf_path.is_file():
             raise FileNotFoundError(f"PDF not found: {pdf_path}")
 
-        out_dir = self._config.cache_dir / "pages" / self._job_id_util.get_job_id(pdf_path)
+        job_id = self._job_id_util.get_job_id(pdf_path)
+        out_dir = self._config.cache_dir / "pages" / job_id
         out_dir.mkdir(parents=True, exist_ok=True)
 
         pages: list[RenderedPage] = []
@@ -52,6 +53,7 @@ class Rasterizer:
                         image_path=dest,
                         width=pix.width,
                         height=pix.height,
+                        id=stable_id(job_id, f"p{i}"),
                     )
                 )
         return pages

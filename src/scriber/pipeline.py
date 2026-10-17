@@ -9,10 +9,10 @@ from pathlib import Path
 from surya.inference import SuryaInferenceManager
 
 from scriber.config import ScriberConfig
-from scriber.domain import PageResult
+from scriber.domain import PageResult, ProcessedBlock
 from scriber.layout import LayoutDetector
 from scriber.ocr import OCREngine
-from scriber.processing import process_page
+from scriber.processing import PageProcessor
 from scriber.rasterizer import Rasterizer
 from scriber.utils import JobIdUtil
 
@@ -28,6 +28,7 @@ class Pipeline:
         surya_manager = SuryaInferenceManager()
         self._layout = LayoutDetector(surya_manager)
         self._ocr = OCREngine(surya_manager, language=self._config.language)
+        self._processor = PageProcessor(self._config)
 
     @property
     def config(self) -> ScriberConfig:
@@ -45,6 +46,7 @@ class Pipeline:
         print(f"rasterized {len(rendered)} page(s) at {self._config.dpi} DPI")
 
         page_results: list[PageResult] = []
+        processed_results: list[ProcessedBlock] = []
         batch_size = max(1, self._config.page_batch_size)
         for start in range(0, len(rendered), batch_size):
             batch = rendered[start: start + batch_size]
@@ -56,9 +58,13 @@ class Pipeline:
             for page, blocks, ocr in zip(
                     batch, layout_blocks, ocr_results, strict=True
             ):
-                processed = process_page(page, blocks, ocr, self._config)
+                processed = self._processor.process(page, blocks, ocr)
+                processed_results.extend(processed)
+
+                # TODO: do we need the PageResult at this stage ?
                 result = PageResult(
                     page_number=page.page_number,
+                    id=page.id,
                     image_path=page.image_path,
                     width=page.width,
                     height=page.height,

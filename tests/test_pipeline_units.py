@@ -9,6 +9,7 @@ modules are imported).
 from __future__ import annotations
 
 import tempfile
+import uuid
 from pathlib import Path
 
 from PIL import Image
@@ -19,8 +20,8 @@ from scriber.enums import BlockType
 from scriber.helpers import HtmlExtractor
 from scriber.layout import _promote_titles
 from scriber.ocr import _force_ocr_language, block_prompt
-from scriber.processing import process_page
-from scriber.utils import JobIdUtil
+from scriber.processing import PageProcessor
+from scriber.utils import JobIdUtil, stable_id
 
 PAGE_W, PAGE_H = 1000, 1600
 
@@ -98,6 +99,54 @@ def test_promotes_centered_large_isolated_text_to_title():
     assert blocks[0].label == "Text" and blocks[2].label == "Text"
 
 
+def test_promotes_centered_midpage_picture_to_title():
+    # Chapter heading mislabelled as Picture: below the top margin, in the
+    # upper half, horizontally centred.
+    blocks = [
+        make_layout_block(0, "Text", (100, 200, 900, 260)),
+        make_layout_block(1, "Picture", (350, 300, 650, 500)),
+    ]
+    _promote_titles(blocks, PAGE_W, PAGE_H)
+    assert blocks[1].label == "Title"
+    assert blocks[0].label == "Text"
+
+
+def test_promoted_picture_type_matches_label():
+    # In the pipeline, types are assigned at construction, from the raw
+    # surya label — promotion must re-derive them, or the OCR gate (which
+    # checks the type) never sees the promoted Picture as a section header.
+    blocks = [
+        LayoutBlock(
+            index=0, label="Picture", type=BlockType.PICTURE,
+            bbox=(350, 300, 650, 500), reading_order=0,
+        )
+    ]
+    _promote_titles(blocks, PAGE_W, PAGE_H)
+    assert blocks[0].label == "Title"
+    assert blocks[0].type == BlockType.SECTION_HEADER
+
+
+def test_does_not_promote_picture_hugging_top_margin():
+    # A full-page cover starts at the very top — excluded by the
+    # top-margin check.
+    blocks = [
+        make_layout_block(0, "Text", (100, 700, 900, 760)),
+        make_layout_block(1, "Picture", (100, 20, 900, 500)),
+    ]
+    _promote_titles(blocks, PAGE_W, PAGE_H)
+    assert blocks[1].label == "Picture"
+
+
+def test_does_not_promote_offcentre_or_bottom_half_picture():
+    blocks = [
+        make_layout_block(0, "Text", (100, 200, 900, 260)),
+        make_layout_block(1, "Picture", (300, 1000, 700, 1200)),  # bottom half
+        make_layout_block(2, "Picture", (60, 300, 460, 500)),  # left-aligned
+    ]
+    _promote_titles(blocks, PAGE_W, PAGE_H)
+    assert blocks[1].label == "Picture" and blocks[2].label == "Picture"
+
+
 def test_does_not_promote_offcenter_tall_block():
     blocks = [
         make_layout_block(0, "Text", (100, 200, 900, 300)),
@@ -135,14 +184,17 @@ def _make_page(tmp: Path) -> tuple[RenderedPage, ScriberConfig]:
     image_path = tmp / "pages" / "job" / "page_0000.png"
     image_path.parent.mkdir(parents=True)
     Image.new("RGB", (PAGE_W, PAGE_H), "white").save(image_path)
+    # Threshold matches the production default (see config.py): real
+    # headings OCR at 0.9+, so anything below 0.8 is garbage.
     config = ScriberConfig(
-        dpi=200, title_confidence_threshold=0.5, cache_dir=tmp, page_batch_size=1
+        dpi=200, title_confidence_threshold=0.8, cache_dir=tmp, page_batch_size=1
     )
     page = RenderedPage(
         page_number=0,
         image_path=image_path,
         width=PAGE_W,
         height=PAGE_H,
+        id=stable_id("testjob", "p0"),
     )
     return page, config
 
@@ -185,7 +237,9 @@ def test_block_processing_rules(tmp_path: Path):
         ocr_results = [ocr for _, ocr in block_inputs]
         page, config = _make_page(tmp)
 
-        processed = process_page(page, layout_blocks, ocr_results, config)
+        processed = PageProcessor(config).process(
+            page, layout_blocks, ocr_results
+        )
         (header, page_num, picture, low_title, high_title, no_ocr_title, body, footer, caption, chem) = (
             processed
         )
@@ -217,7 +271,9 @@ def test_processing_does_not_mutate_input_models(tmp_path: Path):
         ocr_results: list[OCRBlock | None] = [ocr]
         page, config = _make_page(tmp)
 
-        processed = process_page(page, layout_blocks, ocr_results, config)
+        processed = PageProcessor(config).process(
+            page, layout_blocks, ocr_results
+        )
 
         # The LayoutBlock and OCRBlock are untouched — all decisions live
         # on the ProcessedBlock, which references the same objects.
@@ -236,8 +292,73 @@ def test_bottom_text_that_is_not_a_page_number_is_kept(tmp_path: Path):
             OCRBlock(text="Selesai bab pertama, bersambung ke bab berikutnya")
         ]
         page, config = _make_page(tmp)
-        processed = process_page(page, layout_blocks, ocr_results, config)
+        processed = PageProcessor(config).process(
+            page, layout_blocks, ocr_results
+        )
         assert not processed[0].dropped
+
+
+def test_confident_but_empty_text_title_is_image_embedded(tmp_path: Path):
+    # A promoted Picture that OCR'd to nothing: confidence alone must not
+    # keep an empty title as text — it falls back to image embedding.
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        layout_blocks = [make_layout_block(0, "Title", (300, 700, 700, 760))]
+        ocr_results: list[OCRBlock | None] = [OCRBlock(text="   ", confidence=0.95)]
+        page, config = _make_page(tmp)
+
+        processed = PageProcessor(config).process(
+            page, layout_blocks, ocr_results
+        )
+
+        assert processed[0].crop_path is not None and processed[0].embed_as_image
+        assert Path(processed[0].crop_path).is_file()
+
+
+def test_garbage_confidence_title_is_image_embedded(tmp_path: Path):
+    # Real Bumi failure: the stylized chapter heading OCR'd to cross-script
+    # gibberish at 0.56 — above the old 0.5 default, so the garbage flowed
+    # into the book text. Headings are short and clean; anything below the
+    # 0.8 threshold embeds the crop instead.
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        layout_blocks = [make_layout_block(0, "Title", (300, 700, 700, 760))]
+        ocr_results: list[OCRBlock | None] = [
+            OCRBlock(text="စာအုပ်စာ", confidence=0.56)
+        ]
+        page, config = _make_page(tmp)
+
+        processed = PageProcessor(config).process(
+            page, layout_blocks, ocr_results
+        )
+
+        assert processed[0].crop_path is not None and processed[0].embed_as_image
+        assert Path(processed[0].crop_path).is_file()
+
+
+# ---- Stable block ids --------------------------------------------------------
+
+
+def test_processed_block_ids_are_stable_uuid5s(tmp_path: Path):
+    # uuid5 over page id + block index: same inputs -> same id (diffable
+    # dumps across runs), distinct blocks -> distinct ids.
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        layout_blocks = [
+            make_layout_block(0, "Text", (100, 200, 900, 260)),
+            make_layout_block(1, "Picture", (200, 400, 800, 600)),
+        ]
+        ocr_results = [OCRBlock(text="body", confidence=0.99), None]
+        page, config = _make_page(tmp)
+
+        first = PageProcessor(config).process(page, layout_blocks, ocr_results)
+        second = PageProcessor(config).process(page, layout_blocks, ocr_results)
+
+        assert [b.id for b in first] == [b.id for b in second]
+        assert first[0].id != first[1].id
+        assert uuid.UUID(first[0].id).version == 5
+        # Serialized into the dump for debugging.
+        assert first[0].as_dict()["id"] == first[0].id
 
 
 # ---- HTML -> text -----------------------------------------------------------

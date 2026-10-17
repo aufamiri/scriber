@@ -15,9 +15,12 @@ class PageResult:
     width: int
     height: int
     blocks: list[ProcessedBlock] = field(default_factory=list)
+    # Copied from the source RenderedPage (Rasterizer) — stable uuid5.
+    id: str = ""
 
     def as_dict(self) -> dict:
         return {
+            "id": self.id,
             "page_number": self.page_number,
             "image_path": str(self.image_path),
             "width": self.width,

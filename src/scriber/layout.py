@@ -22,6 +22,11 @@ from scriber.exceptions import LayoutError
 TITLE_HEIGHT_RATIO = 1.4  # block height vs median Text-block height
 TITLE_CENTER_TOLERANCE = 0.08  # block center vs page center, as page-width fraction
 TITLE_ISOLATION_RATIO = 0.75  # vertical gap to nearest neighbour vs block height
+# Picture-as-title detection (see _promote_picture_titles): a chapter
+# heading mislabelled as "Picture" sits below the top margin, within the
+# upper half of the page, and is horizontally centred.
+PICTURE_TITLE_TOP_FRACTION = 0.10  # top edge below the top 10% of the page
+PICTURE_TITLE_BAND_FRACTION = 0.50  # ...and above the bottom half
 
 
 class LayoutDetector:
@@ -73,14 +78,27 @@ def _bbox_xyxy(box) -> tuple[float, float, float, float]:
 
 
 def _promote_titles(blocks: list[LayoutBlock], page_width: int, page_height: int) -> None:
-    """Relabel centered + large + isolated Text blocks to Title.
+    """Relabel chapter headings the layout model misclassified.
 
     Only runs when the page has no SectionHeader blocks — if surya already
     found an explicit section header, we trust it and don't guess.
+
+    Blocks get their type assigned at construction, from the raw surya
+    label — so after relabelling, re-derive the type to match (a promoted
+    Picture must carry SECTION_HEADER downstream, not PICTURE).
     """
     if any(b.label == "SectionHeader" for b in blocks):
         return
 
+    _promote_text_titles(blocks, page_width)
+    _promote_picture_titles(blocks, page_width, page_height)
+
+    for block in blocks:
+        block.type = BlockType.from_surya_label(block.label)
+
+
+def _promote_text_titles(blocks: list[LayoutBlock], page_width: int) -> None:
+    """Relabel centered + large + isolated Text blocks to Title."""
     text_blocks = [b for b in blocks if b.label == "Text"]
     if len(text_blocks) < 2:
         return
@@ -98,6 +116,32 @@ def _promote_titles(blocks: list[LayoutBlock], page_width: int, page_height: int
             continue
 
         if not _is_isolated(block, blocks):
+            continue
+
+        block.label = "Title"
+
+
+def _promote_picture_titles(blocks: list[LayoutBlock], page_width: int, page_height: int) -> None:
+    """Relabel centred mid-upper-page Picture blocks to Title.
+
+    A chapter heading rendered in a stylised font often comes back from
+    the layout model as "Picture". Geometry separates it from real
+    pictures: it sits below the top margin (a full-page cover starts at
+    the very top), stays in the upper half of the page (mid-text
+    illustrations usually start lower), and is horizontally centred
+    (headings are; drawings rarely are).
+    """
+    page_center_x = page_width / 2
+    for block in [b for b in blocks if b.label == "Picture"]:
+        top = block.bbox[1]
+        if top < PICTURE_TITLE_TOP_FRACTION * page_height:
+            continue  # hugs the top margin — cover/ornament, not a heading
+
+        if top > PICTURE_TITLE_BAND_FRACTION * page_height:
+            continue  # starts in the bottom half — mid-text illustration
+
+        center_x = block.bbox[0] + _width(block) / 2
+        if abs(center_x - page_center_x) > TITLE_CENTER_TOLERANCE * page_width:
             continue
 
         block.label = "Title"

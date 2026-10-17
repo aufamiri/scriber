@@ -33,6 +33,7 @@ from scriber.config import ScriberConfig
 from scriber.domain import LayoutBlock, OCRBlock, ProcessedBlock, RenderedPage
 from scriber.enums import BlockType
 from scriber.exceptions import ProcessingError
+from scriber.utils import stable_id
 
 # The only block types that get processing decisions — every rule below
 # keys on BlockType, never on the fine-grained surya label.
@@ -48,73 +49,98 @@ PAGE_NUM_BOTTOM_FRACTION = 0.10  # within the bottom 10% of the page
 CROP_PAD = 4
 
 
-def process_page(
-        page: RenderedPage,
-        layout_blocks: list[LayoutBlock],
-        ocr_results: list[OCRBlock | None],
-        config: ScriberConfig,
-) -> list[ProcessedBlock]:
-    crops_dir = config.cache_dir / "crops" / _job_dir(page.image_path)
-    page_image = None  # loaded lazily on the first crop
+class PageProcessor:
+    """Per-page processing: type gate, page-number drop, crop + embed rules.
 
-    processed: list[ProcessedBlock] = []
-    for block, ocr in zip(layout_blocks, ocr_results, strict=True):
-        block_type = block.type
+    See the module docstring for the decision rules. Config is captured at
+    construction like every other stage; ``process()`` keeps mutable state
+    (the lazily loaded page image) local to each call, not on the instance.
+    """
 
-        if block_type not in PROCESSED_TYPES:
-            processed.append(
-                ProcessedBlock(
-                    layout=block,
-                    ocr=ocr,
-                    dropped=True,
-                    drop_reason=f"excluded type {block_type.value!r}",
+    def __init__(self, config: ScriberConfig) -> None:
+        self._config = config
+
+    def process(
+            self,
+            page: RenderedPage,
+            layout_blocks: list[LayoutBlock],
+            ocr_results: list[OCRBlock | None],
+    ) -> list[ProcessedBlock]:
+        config = self._config
+        crops_dir = config.cache_dir / "crops" / _job_dir(page.image_path)
+        page_image = None  # loaded lazily on the first crop
+
+        processed: list[ProcessedBlock] = []
+        for block, ocr in zip(layout_blocks, ocr_results, strict=True):
+            block_type = block.type
+            # Deterministic id (uuid5 over the page id + reading-order
+            # index): stable across runs of the same PDF — the future DB
+            # key and the debug handle in the JSON dump.
+            block_id = stable_id(page.id, f"b{block.index}")
+
+            if block_type not in PROCESSED_TYPES:
+                processed.append(
+                    ProcessedBlock(
+                        layout=block,
+                        id=block_id,
+                        ocr=ocr,
+                        dropped=True,
+                        drop_reason=f"excluded type {block_type.value!r}",
+                    )
                 )
-            )
-            continue
+                continue
 
-        if _looks_like_page_number(block, ocr, page):
-            processed.append(
-                ProcessedBlock(
-                    layout=block, ocr=ocr, dropped=True, drop_reason="page number"
+            if _looks_like_page_number(block, ocr, page):
+                processed.append(
+                    ProcessedBlock(
+                        layout=block,
+                        id=block_id,
+                        ocr=ocr,
+                        dropped=True,
+                        drop_reason="page number",
+                    )
                 )
-            )
-            continue
+                continue
 
-        if block.type == BlockType.PICTURE:
-            page_image = _load_page_image(page, page_image)
-            processed.append(
-                ProcessedBlock(
-                    layout=block,
-                    ocr=ocr,
-                    crop_path=_crop(page_image, block, crops_dir, page.page_number),
-                    embed_as_image=True,
+            if block.type == BlockType.PICTURE:
+                page_image = _load_page_image(page, page_image)
+                processed.append(
+                    ProcessedBlock(
+                        layout=block,
+                        id=block_id,
+                        ocr=ocr,
+                        crop_path=_crop(page_image, block, crops_dir, page.page_number),
+                        embed_as_image=True,
+                    )
                 )
-            )
-            continue
+                continue
 
-        if block.type == BlockType.SECTION_HEADER and (
-                ocr is None
-                or ocr.confidence is None
-                or ocr.confidence < config.title_confidence_threshold
-        ):
-            # Low-confidence (or un-OCR'd) title: keep whatever text we have
-            # as best effort, but flag the block for image embedding in the
-            # future EPUB stage.
-            page_image = _load_page_image(page, page_image)
-            processed.append(
-                ProcessedBlock(
-                    layout=block,
-                    ocr=ocr,
-                    crop_path=_crop(page_image, block, crops_dir, page.page_number),
-                    embed_as_image=True,
+            if block.type == BlockType.SECTION_HEADER and (
+                    ocr is None
+                    or ocr.confidence is None
+                    or ocr.confidence < config.title_confidence_threshold
+                    or not ocr.text.strip()
+            ):
+                # Low-confidence, un-OCR'd, or empty-text title (a promoted
+                # Picture that OCR'd to nothing): keep whatever text we have
+                # as best effort, but flag the block for image embedding in
+                # the future EPUB stage.
+                page_image = _load_page_image(page, page_image)
+                processed.append(
+                    ProcessedBlock(
+                        layout=block,
+                        id=block_id,
+                        ocr=ocr,
+                        crop_path=_crop(page_image, block, crops_dir, page.page_number),
+                        embed_as_image=True,
+                    )
                 )
-            )
-            continue
+                continue
 
-        # Body Text and friends: always kept as text, regardless of confidence.
-        processed.append(ProcessedBlock(layout=block, ocr=ocr))
+            # Body Text and friends: always kept as text, regardless of confidence.
+            processed.append(ProcessedBlock(layout=block, id=block_id, ocr=ocr))
 
-    return processed
+        return processed
 
 
 def _job_dir(page_image_path: Path) -> str:

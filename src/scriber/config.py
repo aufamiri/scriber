@@ -49,7 +49,11 @@ def _env_str(name: str, default: str | None) -> str | None:
 @dataclass
 class ScriberConfig:
     dpi: int = 200
-    title_confidence_threshold: float = 0.5
+    # Real headings are short, clean text — OCR scores 0.9+ on them (body
+    # text scores 0.98+). Anything below this is garbage (e.g. a stylized
+    # chapter heading OCR'd to cross-script gibberish at 0.56 with the old
+    # 0.5 default) and gets image-embedded instead of kept as text.
+    title_confidence_threshold: float = 0.8
     cache_dir: Path = field(
         default_factory=lambda: Path.home() / ".cache" / "pdf-ocr"
     )

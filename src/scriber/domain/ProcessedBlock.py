@@ -16,6 +16,10 @@ class ProcessedBlock:
     """
 
     layout: LayoutBlock
+    # Deterministic uuid5 over the page id + block reading-order index
+    # (see utils.IdUtil) — stable across runs of the same PDF, and the
+    # future DB key for a processed block.
+    id: str = ""
     ocr: OCRBlock | None = None
     crop_path: Path | None = None
     embed_as_image: bool = False
@@ -24,6 +28,7 @@ class ProcessedBlock:
 
     def as_dict(self) -> dict:
         return {
+            "id": self.id,
             "dropped": self.dropped,
             "drop_reason": self.drop_reason,
             "embed_as_image": self.embed_as_image,
