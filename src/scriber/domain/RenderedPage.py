@@ -7,10 +7,8 @@ from pathlib import Path
 @dataclass
 class RenderedPage:
     """A single PDF page rendered to a PNG on disk (Rasterizer)."""
-
+    id: str
     page_number: int
     image_path: Path
     width: int
     height: int
-    # Deterministic uuid5 over job_id + page number (see utils.IdUtil).
-    id: str = ""

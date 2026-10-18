@@ -9,14 +9,12 @@ from scriber.domain.ProcessedBlock import ProcessedBlock
 @dataclass
 class PageResult:
     """All processed blocks of one page (final pipeline output)."""
-
+    id: str
     page_number: int
     image_path: Path
     width: int
     height: int
     blocks: list[ProcessedBlock] = field(default_factory=list)
-    # Copied from the source RenderedPage (Rasterizer) — stable uuid5.
-    id: str = ""
 
     def as_dict(self) -> dict:
         return {

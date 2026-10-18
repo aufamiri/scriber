@@ -11,7 +11,6 @@ class OCRBlock:
     ``ocr.OCR_TYPES``. Blocks that weren't OCR'd simply have no OCRBlock
     (``ProcessedBlock.ocr is None``).
     """
-
     text: str = ""
     html: str = ""
     confidence: float | None = None

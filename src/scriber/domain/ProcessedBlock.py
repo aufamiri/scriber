@@ -14,12 +14,8 @@ class ProcessedBlock:
     ``ocr`` is present only when OCR ran
     for the block (its type is in ``ocr.OCR_TYPES``).
     """
-
+    id: str
     layout: LayoutBlock
-    # Deterministic uuid5 over the page id + block reading-order index
-    # (see utils.IdUtil) — stable across runs of the same PDF, and the
-    # future DB key for a processed block.
-    id: str = ""
     ocr: OCRBlock | None = None
     crop_path: Path | None = None
     embed_as_image: bool = False

@@ -13,7 +13,6 @@ class LayoutBlock:
     coordinate space. ``type`` is the coarse category derived from
     ``label`` (see ``BlockType.LABEL_TO_TYPE``)
     """
-
     index: int
     label: str
     bbox: tuple[float, float, float, float]
